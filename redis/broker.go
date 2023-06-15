@@ -14,7 +14,7 @@ type broker struct {
 	tq.Broker
 }
 
-func NewBroker(url string) tq.Broker {
+func New(url string) tq.Broker {
 
 	options := &redis.Options{
 		Addr: url,
