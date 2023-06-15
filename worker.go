@@ -8,36 +8,51 @@ import (
 
 type WorkerPool struct {
 
-    // Number of workers to spin up.
-    count int
+	// Pull tasks from distributed stream.
+	broker Broker
 
-    // Pull tasks from broker into a local channel.
-    taskStream chan Task
+	// Number of workers to spin up.
+	count int
 
-    // Push results onto distributed stream.
-    resultStream chan Result
+	// Pull tasks from broker into a local channel.
+	taskStream chan Task
 
-    // Multiplex a set of task handlers on startup.
-    handler *ServeMux
+	// Push results onto distributed stream.
+	resultStream chan Result
 
-    // Pull tasks from distributed stream.
-    broker Broker
+	// Multiplex a set of task handlers on startup.
+	handler *ServeMux
 
-    // Done channel
-    done chan struct{}
+	// Done channel
+	done chan struct{}
 }
 
 func New(count int) WorkerPool {
-    return WorkerPool{
-        count: count,
-        taskStream: make(chan Task),
-        resultStream: make(chan Result),
-        handler: NewServeMux(),
-        done: make(chan struct{}),
-    }
+	return WorkerPool{
+		count:        count,
+		taskStream:   make(chan Task),
+		resultStream: make(chan Result),
+		handler:      NewServeMux(),
+		done:         make(chan struct{}),
+	}
 }
 
-func (s *WorkerPool) Run(ctx context.Context, wg *sync.WaitGroup) {
+func (s *WorkerPool) Serve(ctx context.Context) {
+
+	// Pull events from broker into local channels.
+	//var wgc sync.WaitGroup
+	//s.consume(ctx, &wgc)
+
+	// Offload consumed events to workers.
+	var wgp sync.WaitGroup
+	s.process(ctx, &wgp)
+}
+
+func (s *WorkerPool) consume(ctx context.Context, wg *sync.WaitGroup) error {
+	return nil
+}
+
+func (s *WorkerPool) process(ctx context.Context, wg *sync.WaitGroup) {
 	for i := 0; i < s.count; i++ {
 		wg.Add(1)
 		go worker(ctx, wg, s.handler, s.taskStream, s.resultStream)

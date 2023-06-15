@@ -1,8 +1,8 @@
 package tq
 
 type Result struct {
-    Error error
-    Value interface{}
+	Error error
+	Value interface{}
 }
 
 type Task struct {

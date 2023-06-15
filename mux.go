@@ -7,25 +7,25 @@ import (
 )
 
 type ServeMux struct {
-    m map[string]Handler
+	m map[string]Handler
 }
 
 func NewServeMux() *ServeMux {
-    return &ServeMux{
-        m: make(map[string]Handler),
-    }
+	return &ServeMux{
+		m: make(map[string]Handler),
+	}
 }
 
 // Dispatches the task to the handler whose pattern matches the task type.
 func (s *ServeMux) ProcessTask(ctx context.Context, task *Task) Result {
 	handler, ok := s.m[task.Key]
 	if !ok {
-        return Result{
-            Error: fmt.Errorf("no handler registered"),
-        }
+		return Result{
+			Error: fmt.Errorf("no handler registered"),
+		}
 	}
 
-    return handler.ProcessTask(ctx, task)
+	return handler.ProcessTask(ctx, task)
 }
 
 // Registers the handler function for the given pattern.
