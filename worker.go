@@ -16,7 +16,7 @@ type WorkerPool struct {
 	tasks TaskQueue
 
 	// Push results onto distributed stream.
-	results TaskQueue
+	results ResultQueue
 
 	// Multiplex a set of task handlers on startup.
 	handler *ServeMux
@@ -25,13 +25,13 @@ type WorkerPool struct {
 	done chan struct{}
 }
 
-func NewWorkerPool(tasks TaskQueue, results TaskQueue, count int) WorkerPool {
+func NewWorkerPool(tasks TaskQueue, results ResultQueue, count int) WorkerPool {
 	return WorkerPool{
-		count:        count,
+		count:   count,
 		tasks:   tasks,
 		results: results,
-		handler:      NewServeMux(),
-		done:         make(chan struct{}),
+		handler: NewServeMux(),
+		done:    make(chan struct{}),
 	}
 }
 
@@ -49,47 +49,53 @@ func (s *WorkerPool) Serve(ctx context.Context) {
 func (s *WorkerPool) process(ctx context.Context, wg *sync.WaitGroup) {
 
 	// Pull events from broker into local channels.
-    wg.Add(1)
-    taskStream := make(chan *Task)
-    go func() {
-        defer wg.Done()
-        for {
-            select {
-            case <-ctx.Done():
-                return
-            default:
-                msgs, err := s.tasks.Dequeue(ctx)
-                if err != nil {
-                    log.Fatalln(err)
-                }
-                for _, msg := range msgs {
-                    taskStream <- msg
-                }
-            }
-        }
-    }()
+	wg.Add(1)
+	taskStream := make(chan *Task)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msgs, err := s.tasks.Dequeue(ctx)
+				if err != nil {
+					log.Fatalln(err)
+				}
+				for _, t := range msgs {
+					taskStream <- t
+				}
+			}
+		}
+	}()
 
-    // Push results from channel onto distributed stream.
-    wg.Add(1)
-    resultStream := make(chan Result)
-    go func() {
-        defer wg.Done()
-        for {
-            select {
-            case <-ctx.Done():
-                return
-            case r := <-resultStream:
+	// Push results from channel onto distributed stream.
+	wg.Add(1)
+	resultStream := make(chan *Result)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-resultStream:
 
-                log.Printf("pushing results: %v", r)
+				// Enqueue the process task onto the result stream.
+				err := s.results.Enqueue(ctx, t)
+				if err != nil {
+					log.Fatalf(": %v", err)
+				}
 
-                // Ack stream not to send task to other workers.
-                //err := s.broker.Ack(ctx, r.Id)
-                //if err != nil {
-                //    log.Fatalln("unable to ack task: %w", err)
-                //}
-            }
-        }
-    }()
+				log.Printf("enqueued to result stream: %v", t)
+
+				// Send ack to task stream that process results are on the result stream.
+				//err := s.tasks.Ack(ctx, r.Id)
+				//if err != nil {
+				//    log.Fatalln("unable to ack task: %w", err)
+				//}
+			}
+		}
+	}()
 
 	for i := 0; i < s.count; i++ {
 		wg.Add(1)
@@ -97,12 +103,12 @@ func (s *WorkerPool) process(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-func (s *WorkerPool) Register(key string, handler func(context.Context, *Task) Result) {
+func (s *WorkerPool) Register(key string, handler func(context.Context, *Task) *Result) {
 	s.handler.Register(key, handler)
 }
 
 // Ensure confinement by keeping the concurrent scope small.
-func worker(ctx context.Context, wg *sync.WaitGroup, handler *ServeMux, tasks <-chan *Task, results chan<- Result) {
+func worker(ctx context.Context, wg *sync.WaitGroup, handler *ServeMux, tasks <-chan *Task, results chan<- *Result) {
 
 	defer wg.Done()
 
@@ -112,13 +118,10 @@ func worker(ctx context.Context, wg *sync.WaitGroup, handler *ServeMux, tasks <-
 			if !ok {
 				return
 			}
-			// fan-in job execution multiplexing results into the results channel
+			// Fan-In job execution multiplexing results into the results channel.
 			results <- handler.ProcessTask(ctx, task)
 		case <-ctx.Done():
 			fmt.Printf("cancelled worker. Error detail: %v\n", ctx.Err())
-			results <- Result{
-				Error: ctx.Err(),
-			}
 			return
 		}
 	}

@@ -30,21 +30,18 @@ func TaskUploadArtifacts(id int, data string) *tq.Task {
 	}
 }
 
-func HandlerUploadArtifacts(ctx context.Context, t *tq.Task) tq.Result {
-
-	op := "HandlerUploadArtifacts"
+func HandlerUploadArtifacts(ctx context.Context, t *tq.Task) *tq.Result {
 
 	var p ArtifactPayload
 	if err := json.Unmarshal(t.Payload, &p); err != nil {
-		return tq.Result{
-			Id:    t.Id,
-			Error: fmt.Errorf("%s: %w", op, err),
+		return &tq.Result{
+			Error: err.Error(),
 		}
 	}
 
 	fmt.Printf("[*] Upload job artifacts (job-id: %d, storage-id: %s)\n", p.Id, p.Data)
 
-	return tq.Result{
-		Id: t.Id,
+	return &tq.Result{
+		Value: "hello there!",
 	}
 }

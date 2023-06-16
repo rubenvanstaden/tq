@@ -20,7 +20,7 @@ func main() {
 	go func() { <-c; cancel() }()
 
 	taskQueue := redis.NewTaskQueue(BROKER_URL, "default")
-	resultQueue := redis.NewTaskQueue(BROKER_URL, "results")
+	resultQueue := redis.NewResultQueue(BROKER_URL, "results")
 
 	wp := tq.NewWorkerPool(taskQueue, resultQueue, 1)
 

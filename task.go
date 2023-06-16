@@ -6,9 +6,8 @@ import (
 )
 
 type Result struct {
-	Id    string
-	Error error
-	Value interface{}
+	Error string  `json:"error"`
+	Value string `json:"value"`
 }
 
 type Task struct {
@@ -33,6 +32,25 @@ type Task struct {
 	Timeout int64 `json:"timeout,string"`
 }
 
+func (s Result) Encode() map[string]interface{} {
+
+	var values map[string]interface{}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		log.Fatalf("Unable to marshall task: %s", err)
+	}
+
+	err = json.Unmarshal(data, &values)
+	if err != nil {
+		panic(err)
+	}
+
+    log.Println(values)
+
+	return values
+}
+
 func (s Task) Encode() map[string]interface{} {
 
 	var values map[string]interface{}
@@ -47,10 +65,12 @@ func (s Task) Encode() map[string]interface{} {
 		panic(err)
 	}
 
+    log.Println(values)
+
 	return values
 }
 
-func Decode(msgId string, val map[string]interface{}) *Task {
+func DecodeTask(msgId string, val map[string]interface{}) *Task {
 
 	jsonbody, err := json.Marshal(val)
 	if err != nil {
@@ -65,4 +85,19 @@ func Decode(msgId string, val map[string]interface{}) *Task {
 	msg.Id = msgId
 
 	return &msg
+}
+
+func DecodeResult(val map[string]interface{}) *Result {
+
+	jsonbody, err := json.Marshal(val)
+	if err != nil {
+		panic(err)
+	}
+
+	res := Result{}
+	if err := json.Unmarshal(jsonbody, &res); err != nil {
+		panic(err)
+	}
+
+	return &res
 }

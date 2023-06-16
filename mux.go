@@ -2,7 +2,6 @@ package tq
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -17,11 +16,11 @@ func NewServeMux() *ServeMux {
 }
 
 // Dispatches the task to the handler whose pattern matches the task type.
-func (s *ServeMux) ProcessTask(ctx context.Context, task *Task) Result {
+func (s *ServeMux) ProcessTask(ctx context.Context, task *Task) *Result {
 	handler, ok := s.m[task.Key]
 	if !ok {
-		return Result{
-			Error: fmt.Errorf("no handler registered"),
+		return &Result{
+			Error: "no handler registered",
 		}
 	}
 
@@ -29,7 +28,7 @@ func (s *ServeMux) ProcessTask(ctx context.Context, task *Task) Result {
 }
 
 // Registers the handler function for the given pattern.
-func (s *ServeMux) Register(pattern string, handler func(context.Context, *Task) Result) {
+func (s *ServeMux) Register(pattern string, handler func(context.Context, *Task) *Result) {
 
 	if handler == nil {
 		panic("taskq: nil handler")

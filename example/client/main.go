@@ -19,8 +19,9 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() { <-c; cancel() }()
 
+	// Push task to worker pool for execution.
+
 	taskQueue := redis.NewTaskQueue(BROKER_URL, "default")
-	resultQueue := redis.NewTaskQueue(BROKER_URL, "results")
 
 	tk := task.TaskUploadArtifacts(0, "hello friend")
 
@@ -29,6 +30,9 @@ func main() {
 		log.Fatalf(": %v", err)
 	}
 
+	// Pull processed task results.
+
+	resultQueue := redis.NewResultQueue(BROKER_URL, "results")
 	for {
 		select {
 		case <-ctx.Done():
@@ -39,6 +43,7 @@ func main() {
 				log.Fatalln(err)
 			}
 			for _, msg := range msgs {
+				log.Println("YES!")
 				log.Println(msg)
 			}
 		}
