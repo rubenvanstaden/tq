@@ -37,14 +37,14 @@ func HandlerUploadArtifacts(ctx context.Context, t *tq.Task) tq.Result {
 	var p ArtifactPayload
 	if err := json.Unmarshal(t.Payload, &p); err != nil {
 		return tq.Result{
-            Id: t.Id,
-            Error: fmt.Errorf("%s: %w", op, err),
-        }
+			Id:    t.Id,
+			Error: fmt.Errorf("%s: %w", op, err),
+		}
 	}
 
 	fmt.Printf("[*] Upload job artifacts (job-id: %d, storage-id: %s)\n", p.Id, p.Data)
 
 	return tq.Result{
-        Id: t.Id,
-    }
+		Id: t.Id,
+	}
 }

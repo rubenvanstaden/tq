@@ -19,9 +19,10 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() { <-c; cancel() }()
 
-	broker := redis.New(BROKER_URL)
+	taskQueue := redis.NewTaskQueue(BROKER_URL, "default")
+	resultQueue := redis.NewTaskQueue(BROKER_URL, "results")
 
-	wp := tq.NewWorkerPool(broker, 1)
+	wp := tq.NewWorkerPool(taskQueue, resultQueue, 1)
 
 	wp.Register("upload", task.HandlerUploadArtifacts)
 

@@ -19,11 +19,12 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() { <-c; cancel() }()
 
-	broker := redis.New(BROKER_URL)
+	taskQueue := redis.NewTaskQueue(BROKER_URL, "default")
+	resultQueue := redis.NewTaskQueue(BROKER_URL, "results")
 
 	tk := task.TaskUploadArtifacts(0, "hello friend")
 
-	err := broker.Enqueue(ctx, tk)
+	err := taskQueue.Enqueue(ctx, tk)
 	if err != nil {
 		log.Fatalf(": %v", err)
 	}
@@ -31,14 +32,14 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-            return
+			return
 		default:
-            msgs, err := broker.Dequeue(ctx, "result")
+			msgs, err := resultQueue.Dequeue(ctx)
 			if err != nil {
-                log.Fatalln(err)
+				log.Fatalln(err)
 			}
 			for _, msg := range msgs {
-                log.Println(msg)
+				log.Println(msg)
 			}
 		}
 	}

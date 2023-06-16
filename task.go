@@ -6,7 +6,7 @@ import (
 )
 
 type Result struct {
-    Id string
+	Id    string
 	Error error
 	Value interface{}
 }
