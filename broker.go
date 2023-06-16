@@ -7,8 +7,11 @@ import (
 type Broker interface {
 
 	// Add new messages to stream.
-	Enqueue(ctx context.Context, message *Task) error
+	Enqueue(ctx context.Context, msg *Task) error
 
 	// Pull new messages from stream.
-	Messages(ctx context.Context, name string) ([]*Task, error)
+	Dequeue(ctx context.Context, name string) ([]*Task, error)
+
+	// Ackowledge a task was completed by a worker.
+	Ack(ctx context.Context, msgId string) error
 }
