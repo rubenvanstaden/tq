@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 
 	"github.com/rubenvanstaden/tq"
-	"github.com/rubenvanstaden/tq/example/task"
 	"github.com/rubenvanstaden/tq/redis"
 )
 
@@ -19,12 +20,53 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() { <-c; cancel() }()
 
-	taskQueue := redis.NewTaskQueue(BROKER_URL, "default")
-	resultQueue := redis.NewResultQueue(BROKER_URL, "results")
+    ts := redis.NewStream(BROKER_URL, "default")
+    rs := redis.NewStream(BROKER_URL, "results")
 
-	wp := tq.NewWorkerPool(taskQueue, resultQueue, 1)
+	wp := tq.NewWorkerPool(ts, rs, 1)
 
-	wp.Register("upload", task.HandlerUploadArtifacts)
+	wp.Register("upload", HandlerUploadArtifacts)
+	wp.Register("download", HandlerDownloadArtifacts)
 
 	wp.Serve(ctx)
+}
+
+func HandlerUploadArtifacts(ctx context.Context, t *tq.Task) *tq.Result {
+
+	var p ArtifactPayload
+
+	err := json.Unmarshal(t.Payload, &p)
+    if err != nil {
+		return &tq.Result{
+            Value: "",
+			Error: err.Error(),
+		}
+	}
+
+	fmt.Println("[*] Uploading artifacts...")
+
+	return &tq.Result{
+        Value: "result:" + p.Data,
+        Error: "",
+	}
+}
+
+func HandlerDownloadArtifacts(ctx context.Context, t *tq.Task) *tq.Result {
+
+	var p ArtifactPayload
+
+	err := json.Unmarshal(t.Payload, &p)
+    if err != nil {
+		return &tq.Result{
+            Value: "",
+			Error: err.Error(),
+		}
+	}
+
+	fmt.Println("[*] Downloading artifacts...")
+
+	return &tq.Result{
+        Value: "result:" + p.Data,
+        Error: "",
+	}
 }

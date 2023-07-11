@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,18 +13,18 @@ import (
 	"github.com/rubenvanstaden/tq"
 )
 
-type resultQueue struct {
+type stream struct {
 	client       *redis.Client
+	streamSize   int
 	streamName   string
 	groupName    string
 	workerName   string
-	streamSize   int
 	blockTimeout time.Duration
 
-	tq.ResultQueue
+	tq.Stream
 }
 
-func NewResultQueue(url, name string) tq.ResultQueue {
+func NewStream(url, name string) tq.Stream {
 
 	options := &redis.Options{
 		Addr: url,
@@ -36,7 +37,7 @@ func NewResultQueue(url, name string) tq.ResultQueue {
 		log.Fatal("Unable to connect to Redis", err)
 	}
 
-	q := &resultQueue{
+	tq := &stream{
 		client:       client,
 		streamName:   name,
 		groupName:    "tq:workers",
@@ -47,20 +48,20 @@ func NewResultQueue(url, name string) tq.ResultQueue {
 
 	// Create stream in redis DB.
 	ctx := context.Background()
-	err = client.XGroupCreateMkStream(ctx, q.streamName, q.groupName, "0").Err()
+	err = client.XGroupCreateMkStream(ctx, tq.streamName, tq.groupName, "0").Err()
 	if err != nil {
 		if !strings.Contains(fmt.Sprint(err), "BUSYGROUP") {
-			fmt.Printf("Error on create Consumer Group: %v ...\n", q.groupName)
+			fmt.Printf("Error on create Consumer Group: %v ...\n", tq.groupName)
 			log.Fatalln(err)
 		}
 	}
 
-	return q
+	return tq
 }
 
-func (s *resultQueue) Enqueue(ctx context.Context, msg *tq.Result) error {
+func (s *stream) Enqueue(ctx context.Context, msg *tq.Task) error {
 
-	op := "redis.Enqueue"
+	op := "redis.Enstream"
 
 	args := &redis.XAddArgs{
 		Stream: s.streamName,
@@ -68,15 +69,17 @@ func (s *resultQueue) Enqueue(ctx context.Context, msg *tq.Result) error {
 		MaxLen: int64(s.streamSize),
 	}
 
-	_, err := s.client.XAdd(ctx, args).Result()
+	id, err := s.client.XAdd(ctx, args).Result()
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
+	msg.Id = id
+
 	return nil
 }
 
-func (s *resultQueue) Dequeue(ctx context.Context) ([]*tq.Result, error) {
+func (s *stream) Dequeue(ctx context.Context) ([]*tq.Task, error) {
 
 	op := "redis.Messages"
 
@@ -85,7 +88,7 @@ func (s *resultQueue) Dequeue(ctx context.Context) ([]*tq.Result, error) {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	var msgs []*tq.Result
+	var msgs []*tq.Task
 
 	if len(val) != 0 {
 
@@ -99,16 +102,37 @@ func (s *resultQueue) Dequeue(ctx context.Context) ([]*tq.Result, error) {
 
 		tasks, err := s.client.XReadGroup(ctx, args).Result()
 		if err != nil && err != redis.Nil {
-			return nil, fmt.Errorf("could not dequeue task: %w", err)
+			return nil, fmt.Errorf("could not destream task: %w", err)
 		}
 
 		if len(tasks) != 0 {
 			for _, task := range tasks[0].Messages {
-				msg := tq.DecodeResult(task.Values)
+				msg := tq.DecodeTask(task.ID, task.Values)
 				msgs = append(msgs, msg)
 			}
 		}
 	}
 
 	return msgs, nil
+}
+
+func (s *stream) Ack(ctx context.Context, msgId string) error {
+
+	op := "redis.Ack"
+
+	if msgId == "" {
+		log.Fatalf("message id not set")
+	}
+
+	err := s.client.XAck(ctx, s.streamName, s.groupName, msgId).Err()
+
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("%s: %s", op, "not found")
+	}
+
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
 }

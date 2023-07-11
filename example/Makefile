@@ -5,8 +5,8 @@ fmt:
 client:
 	go run ./client/*
 
-worker:
-	go run ./worker/*
+server:
+	go run ./server/*
 
 up:
 	docker-compose up -d
