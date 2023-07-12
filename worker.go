@@ -46,59 +46,66 @@ func (s *pool) Serve(ctx context.Context) {
 	wg.Wait()
 }
 
-// TODO: Implement confinement by defining a smaller lexical scope.
 func (s *pool) process(ctx context.Context, wg *sync.WaitGroup) {
 
 	// Pull events from broker into local channels.
-	wg.Add(1)
-	taskStream := make(chan *Task)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				msgs, err := s.tasks.Dequeue(ctx)
-				if err != nil {
-					log.Fatalln(err)
-				}
-				for _, t := range msgs {
-					taskStream <- t
-				}
-			}
-		}
-	}()
+    // Defining a function creates a smaller lexical scope for confinement.
+    taskStream := func() <-chan *Task {
+        wg.Add(1)
+        stream := make(chan *Task)
+        go func() {
+            defer wg.Done()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                default:
+                    msgs, err := s.tasks.Dequeue(ctx)
+                    if err != nil {
+                        log.Fatalln(err)
+                    }
+                    for _, t := range msgs {
+                        stream <- t
+                    }
+                }
+            }
+        }()
+        return stream
+    }
 
 	// Push results from channel onto distributed stream.
-	wg.Add(1)
-	resultStream := make(chan *Task)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case t := <-resultStream:
+    // Defining a function creates a smaller lexical scope for confinement.
+    resultStream := func() chan<- *Task {
+        wg.Add(1)
+        stream := make(chan *Task)
+        go func() {
+            defer wg.Done()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                case t := <-stream:
 
-				// Enqueue the process task onto the result stream.
-				err := s.results.Enqueue(ctx, t)
-				if err != nil {
-					log.Fatalf(": %v", err)
-				}
+                    // Enqueue the process task onto the result stream.
+                    err := s.results.Enqueue(ctx, t)
+                    if err != nil {
+                        log.Fatalf(": %v", err)
+                    }
 
-				// Send ack to task stream that process results are on the result stream.
-				//err := s.tasks.Ack(ctx, r.Id)
-				//if err != nil {
-				//    log.Fatalln("unable to ack task: %w", err)
-				//}
-			}
-		}
-	}()
+                    // Send ack to task stream that process results are on the result stream.
+                    //err := s.tasks.Ack(ctx, r.Id)
+                    //if err != nil {
+                    //    log.Fatalln("unable to ack task: %w", err)
+                    //}
+                }
+            }
+        }()
+        return stream
+    }
 
 	for i := 0; i < s.count; i++ {
 		wg.Add(1)
-		go worker(ctx, wg, s.handler, taskStream, resultStream)
+		go worker(ctx, wg, s.handler, taskStream(), resultStream())
 	}
 }
 
