@@ -3,83 +3,128 @@ package tq
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 )
 
-type WorkerPool struct {
-
-	// Pull tasks from distributed stream.
-	broker Broker
+type pool struct {
 
 	// Number of workers to spin up.
 	count int
 
-	// Pull tasks from broker into a local channel.
-	taskStream chan Task
+	// Pull tasks from distributed stream.
+	tasks Stream
 
 	// Push results onto distributed stream.
-	resultStream chan Result
+	results Stream
 
 	// Multiplex a set of task handlers on startup.
-	handler *ServeMux
-
-	// Done channel
-	done chan struct{}
+	handler *serveMux
 }
 
-func NewWorkerPool(broker Broker, count int) WorkerPool {
-	return WorkerPool{
-        broker: broker,
-		count:        count,
-		taskStream:   make(chan Task),
-		resultStream: make(chan Result),
-		handler:      NewServeMux(),
-		done:         make(chan struct{}),
+func NewWorkerPool(tasks, results Stream, count int) pool {
+	return pool{
+		count:   count,
+		tasks:   tasks,
+		results: results,
+		handler: NewServeMux(),
 	}
 }
 
-func (s *WorkerPool) Serve(ctx context.Context) {
-
-	// Pull events from broker into local channels.
-	var wgc sync.WaitGroup
-	s.consume(ctx, &wgc)
-
-	// Offload consumed events to workers.
-	var wgp sync.WaitGroup
-	s.process(ctx, &wgp)
-}
-
-func (s *WorkerPool) consume(ctx context.Context, wg *sync.WaitGroup) error {
-	return nil
-}
-
-func (s *WorkerPool) process(ctx context.Context, wg *sync.WaitGroup) {
-	for i := 0; i < s.count; i++ {
-		wg.Add(1)
-		go worker(ctx, wg, s.handler, s.taskStream, s.resultStream)
-	}
-}
-
-func (s *WorkerPool) Register(key string, handler func(context.Context, *Task) Result) {
+func (s *pool) Register(key string, handler func(context.Context, *Task) *Result) {
 	s.handler.Register(key, handler)
 }
 
+func (s *pool) Serve(ctx context.Context) {
+
+	log.Println("Serving workers")
+
+	var wg sync.WaitGroup
+
+	s.process(ctx, &wg)
+
+	wg.Wait()
+}
+
+func (s *pool) process(ctx context.Context, wg *sync.WaitGroup) {
+
+	// Pull events from broker into local channels.
+    // Defining a function creates a smaller lexical scope for confinement.
+    taskStream := func() <-chan *Task {
+        wg.Add(1)
+        stream := make(chan *Task)
+        go func() {
+            defer wg.Done()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                default:
+                    msgs, err := s.tasks.Dequeue(ctx)
+                    if err != nil {
+                        log.Fatalln(err)
+                    }
+                    for _, t := range msgs {
+                        stream <- t
+                    }
+                }
+            }
+        }()
+        return stream
+    }
+
+	// Push results from channel onto distributed stream.
+    // Defining a function creates a smaller lexical scope for confinement.
+    resultStream := func() chan<- *Task {
+        wg.Add(1)
+        stream := make(chan *Task)
+        go func() {
+            defer wg.Done()
+            for {
+                select {
+                case <-ctx.Done():
+                    return
+                case t := <-stream:
+
+                    // Enqueue the process task onto the result stream.
+                    err := s.results.Enqueue(ctx, t)
+                    if err != nil {
+                        log.Fatalf(": %v", err)
+                    }
+
+                    // Send ack to task stream that process results are on the result stream.
+                    //err := s.tasks.Ack(ctx, r.Id)
+                    //if err != nil {
+                    //    log.Fatalln("unable to ack task: %w", err)
+                    //}
+                }
+            }
+        }()
+        return stream
+    }
+
+	for i := 0; i < s.count; i++ {
+		wg.Add(1)
+		go worker(ctx, wg, s.handler, taskStream(), resultStream())
+	}
+}
+
 // Ensure confinement by keeping the concurrent scope small.
-func worker(ctx context.Context, wg *sync.WaitGroup, handler *ServeMux, jobs <-chan Task, results chan<- Result) {
+func worker(ctx context.Context, wg *sync.WaitGroup, handler *serveMux, tasks <-chan *Task, results chan<- *Task) {
+
 	defer wg.Done()
+
 	for {
 		select {
-		case task, ok := <-jobs:
+		case task, ok := <-tasks:
 			if !ok {
 				return
 			}
-			// fan-in job execution multiplexing results into the results channel
-			results <- handler.ProcessTask(ctx, &task)
+			// Fan-In job execution multiplexing results into the results channel.
+            task.Result = *handler.ProcessTask(ctx, task)
+			results <- task
 		case <-ctx.Done():
 			fmt.Printf("cancelled worker. Error detail: %v\n", ctx.Err())
-			results <- Result{
-				Error: ctx.Err(),
-			}
 			return
 		}
 	}
